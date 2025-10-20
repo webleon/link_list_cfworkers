@@ -42,8 +42,14 @@ async function getLinks(env) {
 
 
 // =========================================================================
-// 3. HTML/CSS 模板 (高度精简)
+// 3. HTML/CSS 模板 (高度精简 & 增加 Favicon)
 // =========================================================================
+
+// 极简的链环 SVG 作为 Favicon (内嵌，无需单独文件)
+const FAVICON_SVG = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="#007bff" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"/><path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"/></svg>`;
+const FAVICON_BASE64 = `data:image/svg+xml;base64,${btoa(FAVICON_SVG)}`;
+
+
 const BASE_CSS = `
     body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif, "Apple Color Emoji", "Segoe UI Emoji", "Segoe UI Symbol"; margin: 0; padding: 20px; background-color: #f8f9fa; color: #333; }
     .container-wide { max-width: 900px; margin: 0 auto; background-color: #fff; padding: 30px; border-radius: 8px; box-shadow: 0 4px 12px rgba(0,0,0,0.08); }
@@ -80,7 +86,6 @@ function renderTokenEntry(mode, statusMessage = null, nextPath = '/') {
     const title = mode === 'view' ? '请输入访问密钥' : '请输入编辑密钥';
     const label = mode === 'view' ? '访问密钥:' : '编辑密钥:';
     
-    // *** 变量定义：确保 buttonText 被定义 ***
     const submitButtonText = '解锁'; 
     let backLink = '';
     
@@ -97,6 +102,7 @@ function renderTokenEntry(mode, statusMessage = null, nextPath = '/') {
 <!DOCTYPE html>
 <html>
 <head><title>${title}</title><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <link rel="icon" href="${FAVICON_BASE64}" type="image/svg+xml">
     <style>${BASE_CSS}.btn-primary { width: 100%; margin-top: 15px; }</style>
 </head>
 <body>
@@ -116,15 +122,18 @@ function renderTokenEntry(mode, statusMessage = null, nextPath = '/') {
 }
 
 // -------------------------------------------------------------------------
-// 渲染列表/编辑页面 (逻辑简化)
+// 渲染列表/编辑页面 (已修复链接打开方式)
 // -------------------------------------------------------------------------
 function renderList(links, isEditMode, statusMessage = null) {
     const msgHtml = statusMessage ? `<p class="status-message ${statusMessage.includes('失败') ? 'error' : 'success'}">${statusMessage}</p>` : '';
 
     if (!isEditMode) {
-        const listItems = links.map(link => `<li class="link-item"><a href="${link.url}" target="_blank" title="点击跳转到: ${link.url}" class="link-title">${link.name || '无名称链接'}</a></li>`).join('');
+        // 修复：移除 target="_blank"，链接在当前页打开
+        const listItems = links.map(link => `<li class="link-item"><a href="${link.url}" title="点击跳转到: ${link.url}" class="link-title">${link.name || '无名称链接'}</a></li>`).join('');
         const html = `
-<!DOCTYPE html><html><head><title>链接列表</title><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><style>${BASE_CSS}</style></head>
+<!DOCTYPE html><html><head><title>链接列表</title><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <link rel="icon" href="${FAVICON_BASE64}" type="image/svg+xml">
+    <style>${BASE_CSS}</style></head>
 <body><div class="container-wide">${msgHtml}<h2>精选链接</h2>${links.length === 0 ? '<p>当前没有已配置的链接。</p>' : `<ul class="link-list">${listItems}</ul>`}<p class="edit-prompt"><a href="${EDIT_PATH}" class="btn btn-primary">编辑</a></p></div></body></html>`;
         return html;
     } 
@@ -164,7 +173,9 @@ function renderList(links, isEditMode, statusMessage = null) {
         });`;
 
     const html = `
-<!DOCTYPE html><html><head><title>编辑链接列表</title><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><style>${BASE_CSS}</style></head>
+<!DOCTYPE html><html><head><title>编辑链接列表</title><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <link rel="icon" href="${FAVICON_BASE64}" type="image/svg+xml">
+    <style>${BASE_CSS}</style></head>
 <body><div class="container-wide">${msgHtml}<h2>编辑链接列表 (最多 ${MAX_LINKS} 个链接)</h2><p class="status-message info">请编辑现有链接或点击“添加新链接”来创建新的条目。**保存时会提交所有可见的行。**</p><form id="editor-form" method="POST" action="/save"><table class="editor-table"><thead><tr><th>名称 (Name)</th><th>URL (链接)</th><th>操作</th></tr></thead><tbody id="link-editor-tbody">${linkRows}</tbody></table><div class="editor-controls"><button type="button" class="btn btn-secondary" id="add-row-btn">添加新链接</button><button type="submit" class="btn btn-primary">保存所有更改</button><button onclick="window.location.href='/'" class="btn btn-secondary" type="button">取消并返回</button></div></form></div>
 <script>${script}</script></body></html>`;
     return html;
@@ -178,7 +189,9 @@ function renderRedirect(message, target, isSuccess = true) {
     const title = isSuccess ? '操作成功' : '操作失败';
     
     const html = `
-<!DOCTYPE html><html><head><title>${title}</title><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><style>${BASE_CSS}.container-narrow { text-align: center; }</style></head>
+<!DOCTYPE html><html><head><title>${title}</title><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <link rel="icon" href="${FAVICON_BASE64}" type="image/svg+xml">
+    <style>${BASE_CSS}.container-narrow { text-align: center; }</style></head>
 <body>
     <div class="container-narrow">
         <p class="status-message ${msgClass}">${message}</p>
@@ -281,8 +294,7 @@ async function handleRequest(request, env) {
                     // 模式为 VIEW 且未认证：需要输入访问密钥
                     return new Response(renderTokenEntry('view', statusMessage, '/'), { headers: { 'Content-Type': 'text/html; charset=utf-8' }, status: 200 });
                 } else {
-                    // 模式为 EDIT 且未认证：
-                    // 预期行为：/ 页面不需要认证，直接显示列表。因此跳过下面的 if/else 逻辑，直接执行列表渲染。
+                    // 模式为 EDIT 且未认证：跳过密钥输入，直接显示列表
                 }
             }
             
