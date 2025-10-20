@@ -3,13 +3,68 @@
 // =========================================================================
 const KV_NAMESPACE_BINDING_NAME = "LINK_LIST_NAMESPACE";
 const EDIT_ROUTE_PATH = "/edit"; 
-const EDIT_TOKEN_PARAM = "edit_token"; // 用于编辑的查询参数/表单字段名
-const VIEW_TOKEN_PARAM = "view_token"; // 用于查看的查询参数/表单字段名
+const EDIT_TOKEN_PARAM = "edit_token"; // 用于编辑的查询参数（仅用于首次进入时的重定向）
+const VIEW_TOKEN_PARAM = "view_token"; // 用于查看的查询参数（仅用于首次进入时的重定向）
+
+// Cookie 相关常量
+const EDIT_COOKIE_NAME = "edit_session";
+const VIEW_COOKIE_NAME = "view_session";
+
 // =========================================================================
-// 辅助函数：从 KV 读取所有链接
+// 辅助函数：Cookie 管理工具
+// =========================================================================
+function setSessionCookie(name, value, maxAgeSeconds, response) {
+    // HttpOnly: 阻止客户端 JavaScript 访问
+    // Secure: 仅在 HTTPS 上发送（Workers 默认是 HTTPS）
+    // SameSite=Lax: 默认的安全设置
+    const cookieString = `${name}=${value}; Path=/; Max-Age=${maxAgeSeconds}; HttpOnly; Secure; SameSite=Lax`;
+    // !!! 关键：确保 response 对象是可修改的，此处 .append() 会修改传入的 response 对象的 headers
+    response.headers.append('Set-Cookie', cookieString);
+    return response;
+}
+
+function getCookie(request, name) {
+    const cookieHeader = request.headers.get('Cookie');
+    if (!cookieHeader) return null;
+    
+    const cookies = cookieHeader.split(';').map(c => c.trim());
+    const cookie = cookies.find(c => c.startsWith(`${name}=`));
+    
+    if (cookie) {
+        return cookie.substring(name.length + 1);
+    }
+    return null;
+}
+
+// 新增：从环境变量获取有效期（秒）
+function getCookieExpirySeconds(env, cookieName) {
+    let hours;
+    
+    if (cookieName === EDIT_COOKIE_NAME) {
+        // 默认值：7天 (168 小时)
+        const defaultHours = 7 * 24; 
+        // 环境变量名称: EDIT_COOKIE_AGE (小时)
+        hours = parseInt(env.EDIT_COOKIE_AGE) || defaultHours; 
+    } else if (cookieName === VIEW_COOKIE_NAME) {
+        // 默认值：1 小时
+        const defaultHours = 1; 
+        // 环境变量名称: VIEW_COOKIE_AGE (小时)
+        hours = parseInt(env.VIEW_COOKIE_AGE) || defaultHours; 
+    } else {
+        return 0; // 未知 Cookie
+    }
+    
+    // 确保解析成功且大于 0，然后转换为秒
+    return Math.max(0, hours) * 3600; 
+}
+
+
+// =========================================================================
+// KV 数据操作
 // =========================================================================
 async function getLinks(env) {
     try {
+        // 尝试列出 keys 以找到 "all_links"
         const { keys } = await env[KV_NAMESPACE_BINDING_NAME].list(); 
         
         const linkKey = keys.find(k => k.name === "all_links");
@@ -38,15 +93,15 @@ async function getLinks(env) {
 }
 
 // =========================================================================
-// 基础 CSS 样式（统一复用）
+// HTML 渲染样式
 // =========================================================================
 const BASE_CSS = `
     body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif, "Apple Color Emoji", "Segoe UI Emoji", "Segoe UI Symbol"; margin: 0; padding: 20px; background-color: #f8f9fa; color: #333; }
     
     /* --- 容器样式 --- */
     .container-wide { max-width: 900px; margin: 0 auto; background-color: #fff; padding: 30px; border-radius: 8px; box-shadow: 0 4px 12px rgba(0,0,0,0.08); }
-    .container-narrow { max-width: 450px; margin: 50px auto; background-color: #fff; padding: 30px; border-radius: 8px; box-shadow: 0 4px 12px rgba(0,0,0,0.1); } /* 统一窄容器宽度 */
-
+    .container-narrow { max-width: 450px; margin: 50px auto; background-color: #fff; padding: 30px; border-radius: 8px; box-shadow: 0 4px 12px rgba(0,0,0,0.1); } 
+    
     h2 { color: #007bff; border-bottom: 2px solid #e9ecef; padding-bottom: 10px; }
     
     /* --- 按钮样式 --- */
@@ -59,11 +114,11 @@ const BASE_CSS = `
     .btn-danger:hover { background-color: #c82333; }
 
     /* --- 状态消息样式 --- */
-    .status-message { padding: 10px; border-radius: 4px; margin-bottom: 15px; font-weight: bold; font-size: 0.9em; } /* 修改：统一字体大小为 0.9em */
+    .status-message { padding: 10px; border-radius: 4px; margin-bottom: 15px; font-weight: bold; font-size: 0.9em; } 
     .status-message.error { background-color: #f8d7da; color: #721c24; border: 1px solid #f5c6cb; }
     .status-message.success { background-color: #d4edda; color: #155724; border: 1px solid #c3e6cb; }
     .status-message.info { background-color: #d1ecf1; color: #0c5460; border: 1px solid #bee5eb; }
-    .status-message.saving { background-color: #fff3cd; color: #856404; border: 1px solid #ffeeba; margin-top: 15px; } /* 修改：增加 margin-top 间距 */
+    .status-message.saving { background-color: #fff3cd; color: #856404; border: 1px solid #ffeeba; margin-top: 15px; } 
     
     /* --- 链接列表样式 --- */
     .link-list { list-style: none; padding: 0; margin: 20px 0; }
@@ -86,13 +141,12 @@ const BASE_CSS = `
 `;
 
 // -------------------------------------------------------------------------
-// 渲染编辑密钥输入页 (窄布局) -> renderEditTokenEntry()
+// 渲染编辑密钥输入页 (窄布局)
 // -------------------------------------------------------------------------
 function renderEditTokenEntry(error = null) {
     const editRoute = EDIT_ROUTE_PATH;
     const messageHtml = error ? `<p class="status-message error">${error}</p>` : '';
 
-    // 专门用于编辑密钥的 CSS
     const TOKEN_CSS = `
         ${BASE_CSS}
         .btn-primary { width: 100%; margin-top: 15px; }
@@ -124,13 +178,12 @@ function renderEditTokenEntry(error = null) {
 }
 
 // -------------------------------------------------------------------------
-// 渲染查看密钥输入页 (窄布局) -> renderViewTokenEntry()
+// 渲染查看密钥输入页 (窄布局)
 // -------------------------------------------------------------------------
 function renderViewTokenEntry(error = null, currentUrl) {
     const messageHtml = error ? `<p class="status-message error">${error}</p>` : '';
     const viewTokenParam = VIEW_TOKEN_PARAM;
 
-    // 专门用于查看密钥的 CSS，与编辑密钥页面共用窄容器
     const TOKEN_CSS = `
         ${BASE_CSS}
         .btn-primary { width: 100%; margin-top: 15px; }
@@ -154,7 +207,6 @@ function renderViewTokenEntry(error = null, currentUrl) {
             <input type="password" id="${viewTokenParam}" name="${viewTokenParam}" required class="input-field"> 
             <button type="submit" class="btn btn-primary">解锁并查看</button>
         </form>
-        <!-- 移除了返回主页的链接 -->
     </div>
 </body>
 </html>
@@ -172,6 +224,7 @@ function renderHtml(links, isEditMode, error = null, success = null, currentUrl,
 
     let redirectScript = '';
     if (success) {
+        // 成功保存后，自动跳转回主页，并清除查询参数
         redirectScript = `<script>
             console.log('${success}');
             setTimeout(() => {
@@ -182,7 +235,7 @@ function renderHtml(links, isEditMode, error = null, success = null, currentUrl,
     }
 
     let contentHtml = '';
-    let containerClass = 'container-wide'; // 默认宽容器
+    let containerClass = 'container-wide'; 
 
     if (!isEditMode) {
         // --- 非编辑模式 (显示列表) ---
@@ -198,12 +251,13 @@ function renderHtml(links, isEditMode, error = null, success = null, currentUrl,
         const successMessageHtml = success ? `<p class="status-message success">${success}</p>` : '';
 
         if (viewToken) {
-            // --- 需要查看密钥的逻辑 ---
+            // --- 需要查看密钥的逻辑 (Cookie 优先) ---
+            const viewSessionCookie = getCookie(currentUrl.request, VIEW_COOKIE_NAME);
             const viewTokenFromQuery = currentUrl.searchParams.get(VIEW_TOKEN_PARAM);
             
-            if (viewTokenFromQuery === viewToken) {
-                // 密钥正确，显示内容
-                containerClass = 'container-wide'; // 保持宽容器
+            if (viewSessionCookie === viewToken || viewTokenFromQuery === viewToken) {
+                // 密钥正确或 Cookie 有效，显示内容
+                containerClass = 'container-wide'; 
                 contentHtml = `
                     <h2>精选链接</h2>
                     ${successMessageHtml} 
@@ -218,13 +272,17 @@ function renderHtml(links, isEditMode, error = null, success = null, currentUrl,
                         </form>
                     </p>
                 `;
+                // 如果是通过查询参数进入的，标记需要重定向设置 Cookie (在 handleRequest 中处理 302)
+                if (viewTokenFromQuery === viewToken) {
+                    return { html: null, status: 302, viewToken: viewToken, viewExpirySeconds: getCookieExpirySeconds(env, VIEW_COOKIE_NAME) }; 
+                }
             } else {
                 // 密钥错误或未输入，调用 renderViewTokenEntry
-                return renderViewTokenEntry(null, currentUrl);
+                return { html: renderViewTokenEntry(null, currentUrl), status: 200 };
             }
 
         } else {
-            // --- 无需密钥，直接显示内容 (使用宽容器) ---
+            // --- 无需密钥，直接显示内容 ---
             contentHtml = `
                 <h2>精选链接</h2>
                 ${successMessageHtml} 
@@ -242,7 +300,7 @@ function renderHtml(links, isEditMode, error = null, success = null, currentUrl,
         }
 
     } else {
-        // --- 编辑模式 (JS 驱动的表单) (使用宽容器) ---
+        // --- 编辑模式 (JS 驱动的表单) ---
         const initialLinksJson = JSON.stringify(links);
 
         contentHtml = `
@@ -292,10 +350,10 @@ function renderHtml(links, isEditMode, error = null, success = null, currentUrl,
                     const row = tbody.insertRow();
                     
                     const nameCell = row.insertCell();
-                    nameCell.innerHTML = \`<input type="text" name="name_\${link.id}" value="\${link.name}" placeholder="链接名称"> \`;
+                    nameCell.innerHTML = \`<input type="text" name="name_\${link.id}" value="\${link.name.replace(/"/g, '&quot;')}" placeholder="链接名称"> \`;
                     
                     const urlCell = row.insertCell();
-                    urlCell.innerHTML = \`<input type="url" name="url_\${link.id}" value="\${link.url}" placeholder="https://example.com"> \`;
+                    urlCell.innerHTML = \`<input type="url" name="url_\${link.id}" value="\${link.url.replace(/"/g, '&quot;')}" placeholder="https://example.com"> \`;
                     
                     const actionCell = row.insertCell();
                     actionCell.style.textAlign = 'center';
@@ -321,7 +379,7 @@ function renderHtml(links, isEditMode, error = null, success = null, currentUrl,
 
             saveButton.onclick = () => {
                 statusDiv.textContent = '正在保存...';
-                statusDiv.className = 'status-message saving'; // 样式已在 CSS 中调整了 margin-top
+                statusDiv.className = 'status-message saving';
                 
                 const updatedLinks = [];
                 const inputs = editorDiv.querySelectorAll('input');
@@ -356,7 +414,7 @@ function renderHtml(links, isEditMode, error = null, success = null, currentUrl,
 
     const messageHtml = error ? `<p class="status-message error">${error}</p>` : '';
 
-    return `
+    return { html: `
 <!DOCTYPE html>
 <html>
 <head>
@@ -372,8 +430,7 @@ function renderHtml(links, isEditMode, error = null, success = null, currentUrl,
         ${contentHtml}
     </div>
 </body>
-</html>
-    `;
+</html>`, status: 200 };
 }
 
 // =========================================================================
@@ -395,66 +452,40 @@ async function handleRequest(request, env) {
     const isPostToSave = request.method === "POST" && pathname === "/save";
     const isPostToEdit = request.method === "POST" && pathname === EDIT_ROUTE_PATH; 
     
-    // 检查编辑模式 (GET /edit?edit_token=...)
-    const editTokenFromQuery = url.searchParams.get(EDIT_TOKEN_PARAM);
-    const isEditMode = editTokenFromQuery === editToken && pathname === EDIT_ROUTE_PATH; 
+    // --- Cookie 检查 ---
+    const editSessionCookie = getCookie(request, EDIT_COOKIE_NAME);
+    const viewSessionCookie = getCookie(request, VIEW_COOKIE_NAME);
     
-    // 检查查看模式 (GET / 或 GET /edit 且 url 中有 view_token)
-    const viewTokenFromQuery = url.searchParams.get(VIEW_TOKEN_PARAM);
-    const requiresViewToken = !!viewToken && !viewTokenFromQuery && url.pathname === "/"; // 仅在主页且需要 token 时触发
-    const isViewTokenCorrect = !!viewToken && viewTokenFromQuery === viewToken;
-
-    // --- 1. 处理保存请求 (POST /save) ---
-    if (isPostToSave) {
-        
-        try {
-            const formData = await request.formData();
-            const receivedToken = formData.get(EDIT_TOKEN_PARAM);
-            const dataContent = formData.get("data"); 
-            
-            const isAuthorized = receivedToken === editToken;
-            
-            if (!isAuthorized) {
-                console.warn("POST /save Unauthorized attempt. Received Token:", receivedToken);
-                return new Response("Unauthorized", { status: 403 });
-            }
-
-            if (!dataContent) {
-                throw new Error("提交的数据为空。");
-            }
-
-            const newLinksArray = JSON.parse(dataContent); 
-            await env[KV_NAMESPACE_BINDING_NAME].put("all_links", JSON.stringify(newLinksArray));
-            
-            const links = await getLinks(env); 
-            return new Response(renderHtml(links, false, null, '链接列表已成功保存!', url, env), { 
-                headers: { 'Content-Type': 'text/html; charset=utf-8' },
-                status: 200
-            });
-
-        } catch (e) {
-            console.error("Save error:", e);
-            const links = await getLinks(env);
-            // 失败时仍使用编辑模式界面，显示错误
-            return new Response(renderHtml(links, true, `保存失败: ${e.message}`, null, url, env), {
-                headers: { 'Content-Type': 'text/html; charset=utf-8' },
-                status: 500
-            });
-        }
-    }
+    // 检查是否已通过编辑密钥验证（Cookie 优先）
+    const isAuthenticatedForEdit = editSessionCookie === editToken; 
     
-    // --- 2. 处理进入/验证编辑密钥请求 (POST /edit) ---
+    // 检查是否已通过查看密钥验证（Cookie 优先）
+    const isAuthenticatedForView = viewToken && (viewSessionCookie === viewToken); 
+
+    // ----------------------------------------------------------
+    // 1. 处理进入/验证编辑密钥请求 (POST /edit)
+    // ----------------------------------------------------------
     if (isPostToEdit) {
         try {
             const formData = await request.formData();
             const receivedToken = formData.get("token");
             
             if (receivedToken === editToken) {
-                // 验证成功，重定向到 GET /edit?edit_token=...
-                const redirectUrl = `${url.origin}${EDIT_ROUTE_PATH}?${EDIT_TOKEN_PARAM}=${editToken}`;
-                return Response.redirect(redirectUrl, 302);
+                // 验证成功，设置 HttpOnly Cookie
+                const editExpirySeconds = getCookieExpirySeconds(env, EDIT_COOKIE_NAME);
+                
+                // !!! 修复：创建新的 Response 对象来设置 Location 和 Set-Cookie
+                const response = new Response(null, {
+                    status: 302,
+                    headers: {
+                        'Location': url.origin + EDIT_ROUTE_PATH
+                    }
+                });
+                setSessionCookie(EDIT_COOKIE_NAME, editToken, editExpirySeconds, response);
+                
+                return response;
             } else {
-                // 验证失败，返回编辑密钥输入页 (使用 renderEditTokenEntry)
+                // 验证失败，返回编辑密钥输入页
                 return new Response(renderEditTokenEntry("密钥错误，请重试。"), {
                     headers: { 'Content-Type': 'text/html; charset=utf-8' },
                     status: 403
@@ -468,64 +499,128 @@ async function handleRequest(request, env) {
             });
         }
     }
-    
-    // --- 3. 处理显示/编辑界面请求 (GET / 或 GET /edit) ---
-    if (request.method === "GET") {
+
+    // ----------------------------------------------------------
+    // 2. 处理保存请求 (POST /save)
+    // ----------------------------------------------------------
+    if (isPostToSave) {
+        
         try {
+            const formData = await request.formData();
+            const receivedToken = formData.get(EDIT_TOKEN_PARAM);
+            const dataContent = formData.get("data"); 
             
-            const links = await getLinks(env);
-            const flatLinks = links.flat().filter(link => link);
+            // 验证逻辑：检查 Cookie 或 POST 数据中的 Token
+            const isAuthorized = isAuthenticatedForEdit || receivedToken === editToken;
             
-            if (pathname === EDIT_ROUTE_PATH) {
-                if (isEditMode) {
-                    // 携带了正确 token，进入编辑模式 (使用宽容器)
-                    return new Response(renderHtml(flatLinks, true, null, null, url, env), {
-                        headers: { 'Content-Type': 'text/html; charset=utf-8' },
-                    });
-                } else {
-                    // 未携带 token 或 token 错误，显示输入编辑密钥页面 (使用 renderEditTokenEntry)
-                    return new Response(renderEditTokenEntry(), {
-                        headers: { 'Content-Type': 'text/html; charset=utf-8' },
-                    });
-                }
-            }
-            
-            // 正常显示主页 (/)
-            if (viewToken) { // 如果设置了 VIEW_TOKEN
-                if (viewTokenFromQuery === viewToken) {
-                     // 密钥正确，显示主列表页
-                     return new Response(renderHtml(flatLinks, false, null, null, url, env), {
-                        headers: { 'Content-Type': 'text/html; charset=utf-8' },
-                    });
-                } else if (viewTokenFromQuery !== null) {
-                    // URL 中有 view_token 但不正确
-                     return new Response(renderViewTokenEntry("访问密钥错误，请重试。", url), {
-                        headers: { 'Content-Type': 'text/html; charset=utf-8' },
-                        status: 403
-                    });
-                } else if (requiresViewToken) {
-                    // URL 中没有 view_token，需要提示输入
-                    return new Response(renderViewTokenEntry(null, url), {
-                        headers: { 'Content-Type': 'text/html; charset=utf-8' },
-                        status: 403
-                    });
-                }
+            if (!isAuthorized) {
+                console.warn("POST /save Unauthorized attempt.");
+                return new Response("Unauthorized", { status: 403 });
             }
 
-            // 无需密钥或 view_token 验证通过，直接显示主页 (使用 renderHtml 默认宽容器)
-            return new Response(renderHtml(flatLinks, false, null, null, url, env), {
-                headers: { 
-                    'Content-Type': 'text/html; charset=utf-8'
-                },
+            if (!dataContent) {
+                throw new Error("提交的数据为空。");
+            }
+
+            const newLinksArray = JSON.parse(dataContent); 
+            await env[KV_NAMESPACE_BINDING_NAME].put("all_links", JSON.stringify(newLinksArray));
+            
+            // 成功后，重定向到主页 (302)，并在重定向响应中设置 VIEW_COOKIE (如果 VIEW_TOKEN 存在且未验证)
+            
+            // !!! 修复：创建新的 Response 对象来设置 Location 和 Set-Cookie
+            const response = new Response(null, {
+                status: 302,
+                headers: {
+                    'Location': url.origin + '/'
+                }
             });
+            
+            if (viewToken && !isAuthenticatedForView) {
+                const viewExpirySeconds = getCookieExpirySeconds(env, VIEW_COOKIE_NAME);
+                setSessionCookie(VIEW_COOKIE_NAME, viewToken, viewExpirySeconds, response);
+            }
+            return response;
 
         } catch (e) {
-            console.error("Read error:", e);
-            return new Response(`Error loading links: ${e.message}`, { 
-                headers: { 'Content-Type': 'text/plain; charset=utf-8' },
-                status: 500 
+            console.error("Save error:", e);
+            const links = await getLinks(env);
+            // 失败时仍使用编辑模式界面，显示错误
+            const rendered = renderHtml(links, true, `保存失败: ${e.message}`, null, { request: request, searchParams: url.searchParams, pathname: url.pathname }, env);
+            return new Response(rendered.html, {
+                headers: { 'Content-Type': 'text/html; charset=utf-8' },
+                status: 500
             });
         }
+    }
+    
+    // ----------------------------------------------------------
+    // 3. 处理显示/编辑界面请求 (GET / 或 GET /edit)
+    // ----------------------------------------------------------
+    if (request.method === "GET") {
+        
+        const links = await getLinks(env);
+        const flatLinks = links.flat().filter(link => link);
+        
+        if (pathname === EDIT_ROUTE_PATH) {
+            if (isAuthenticatedForEdit) {
+                // Cookie 有效，进入编辑模式
+                const rendered = renderHtml(flatLinks, true, null, null, { request: request, searchParams: url.searchParams, pathname: url.pathname }, env);
+                return new Response(rendered.html, {
+                    headers: { 'Content-Type': 'text/html; charset=utf-8' },
+                });
+            } else {
+                // 未验证，显示输入编辑密钥页面
+                return new Response(renderEditTokenEntry(), {
+                    headers: { 'Content-Type': 'text/html; charset=utf-8' },
+                });
+            }
+        }
+        
+        // 正常显示主页 (/)
+        if (viewToken) { // 如果设置了 VIEW_TOKEN
+            const viewTokenFromQuery = url.searchParams.get(VIEW_TOKEN_PARAM);
+            
+            if (isAuthenticatedForView || viewTokenFromQuery === viewToken) {
+                 // Cookie 有效 或 查询参数正确 (首次验证)
+                 
+                 // 如果是通过查询参数进入的，设置 Cookie 并重定向（302）
+                 if (viewTokenFromQuery === viewToken) {
+                    const viewExpirySeconds = getCookieExpirySeconds(env, VIEW_COOKIE_NAME);
+                    
+                    // !!! 修复：创建新的 Response 对象来设置 Location 和 Set-Cookie
+                    const response = new Response(null, {
+                        status: 302,
+                        headers: {
+                            'Location': url.origin + '/'
+                        }
+                    });
+                    setSessionCookie(VIEW_COOKIE_NAME, viewToken, viewExpirySeconds, response);
+                    
+                    return response;
+                 }
+                 
+                 // 否则 (Cookie 有效)，直接返回 HTML
+                 const rendered = renderHtml(flatLinks, false, null, null, { request: request, searchParams: url.searchParams, pathname: url.pathname }, env);
+                 return new Response(rendered.html, {
+                    headers: { 'Content-Type': 'text/html; charset=utf-8' },
+                });
+            } else {
+                // 密钥错误或未输入，调用 renderViewTokenEntry
+                return new Response(renderViewTokenEntry(null, url), {
+                    headers: { 'Content-Type': 'text/html; charset=utf-8' },
+                    status: 200 
+                });
+            }
+        }
+
+        // 无需密钥验证，直接显示主页 
+        const rendered = renderHtml(flatLinks, false, null, null, { request: request, searchParams: url.searchParams, pathname: url.pathname }, env);
+        return new Response(rendered.html, {
+            headers: { 
+                'Content-Type': 'text/html; charset=utf-8'
+            },
+        });
+
     }
 
     return new Response("Method Not Allowed", { status: 405 });
