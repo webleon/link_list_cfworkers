@@ -1,46 +1,36 @@
-# 📄 Cloudflare Workers 精选链接列表 (Link List Manager)
+# 🔗 Cloudflare Worker 链接列表管理
 
-这是一个部署在 Cloudflare Workers 上的轻量级、无服务器（Serverless）的精选链接列表管理系统。它允许用户通过一个受保护的编辑界面来添加、修改和删除链接，并在主页上以简洁的列表形式展示这些链接。
+这是一个轻量级的 Cloudflare Worker 应用程序，用于通过 KV Namespace 存储和展示一个可自定义的链接列表。它支持**只读**模式和**受保护的编辑**模式。
 
-## ✨ 主要功能
+## ⚙️ 部署与配置
 
-1. **动态链接展示**: 在主页（`/`）以列表形式展示配置好的链接。
-2. **受保护的编辑模式**: 只有输入正确的**编辑密钥**（`SECRET_TOKEN`）才能进入编辑界面。
-3. **客户端动态编辑**: 编辑界面使用 JavaScript 动态管理链接列表，支持增、删、改操作。
-4. **可选的查看保护**: 如果设置了 `VIEW_TOKEN` 环境变量，主页访问将需要输入**查看密钥**才能显示列表。
-5. **KV 存储**: 所有链接数据持久化存储在 Cloudflare **KV 命名空间**中。
-6. **简洁的列表**: 非编辑模式下，只显示链接名称，不显示 URL，界面更清爽。
+### 1. KV Namespace
 
-## 🚀 部署步骤 (通过 Cloudflare Dashboard)
+您需要创建一个 KV Namespace 并将其绑定到 Worker。代码中使用的绑定名称为：`LINK_LIST_NAMESPACE`。
 
-部署此项目需要您拥有一个 Cloudflare 账户，并熟悉 Workers 和 KV 的配置。
+### 2. 环境变量 (Environment Variables)
 
-### 步骤 1: 创建 KV 命名空间
+您的 Worker 需要以下环境变量来运行：
 
-1. 登录 Cloudflare Dashboard。
-2. 导航至 **Workers & Pages** -> **KV** -> **Create a namespace**。
-3. 命名您的命名空间，例如：`LINK_LIST_NAMESPACE`。
-4. **记下该命名空间的 ID**（非常重要）。
+| 变量名 | 描述 | 示例值 | 必需性 | 默认值 |
+| :--- | :--- | :--- | :--- | :--- |
+| **`EDIT_TOKEN`** | **编辑模式**所需的密钥。用于验证进入 `/edit` 页面和保存更改的权限。 | `my-secret-edit-key-123` | **必需** | N/A |
+| **`VIEW_TOKEN`** | **查看模式**所需的密钥（可选）。如果设置，用户需要输入此密钥或携带正确的 Cookie 才能看到链接列表。 | `my-secret-view-key-456` | 可选 | 无 |
+| **`EDIT_COOKIE_AGE`** | **编辑会话 Cookie** 的有效期（**小时**）。 | `168` | 可选 | **24 小时** |
+| **`VIEW_COOKIE_AGE`** | **查看会话 Cookie** 的有效期（**小时**）。 | `24` | 可选 | **24 小时** |
 
-### 步骤 2: 创建并配置 Worker
+### 3. 初始数据
 
-1. 在 **Workers & Pages** 中创建一个新的 Worker (或使用现有 Worker)。
-2. 将 Worker 代码粘贴到代码编辑器中。
-3. 进入 Worker 的 **Settings** 标签页，配置以下**环境变量 (Variables)** 和**绑定 (Binding)**：
+链接数据存储在 KV 中的 `all_links` 键下，格式为 JSON 数组。您需要在部署后通过 `/edit` 路径初始化或更新此数据。
 
-| 类型 | 名称 (Name) | 值 (Value) / 绑定目标 | 描述 |
+## 🗺️ 路由和操作
+
+| 路由 | 方法 | 描述 | 访问要求 |
 | :--- | :--- | :--- | :--- |
-| **Variable** | `EDIT_TOKEN` | **您自己设定的编辑密钥** (例如: `my-super-secret-key-123`) | 进入编辑模式和保存更改时所需的**主密钥**。**请务必设置一个强密码！** |
-| **Variable** | `VIEW_TOKEN` | **可选：您自己设定的查看密钥** (例如: `view-only-key-456`) | 如果设置，访问主页时将需要输入此密钥才能看到链接列表。如果**不设置**，列表将**公开**显示。 |
-| **Binding** | `LINK_LIST_NAMESPACE` | **您在步骤 1 中创建的 KV 命名空间** | 用于数据持久化的 KV 绑定。**名称必须与代码中的常量保持一致**。 |
+| `/` | `GET` | 显示链接列表。 | 如果设置了 `VIEW_TOKEN`，则需要验证。 |
+| `/edit` | `GET` | 显示输入编辑密钥的页面。 | 无，进入验证流程。 |
+| `/edit` | `POST` | 提交编辑密钥进行验证。 | 密钥匹配 `EDIT_TOKEN`。成功后将设置会话 Cookie 并进入编辑界面。 |
+| `/save` | `POST` | 提交编辑后的链接数据。 | 必须通过编辑权限验证。 |
 
-4. 点击 **Save and Deploy** 保存并部署 Worker。
-
-### 步骤 3: 首次使用
-
-1. 访问您的 Worker 域名（例如 `https://your-worker-name.your-account.workers.dev/`）。
-2. **如果未设置 `VIEW_TOKEN`**：您将直接看到链接列表。
-3. **如果设置了 `VIEW_TOKEN`**：您将首先看到要求输入**查看密钥**的页面。
-4. 点击主页上的“**进入编辑模式**”按钮（或直接访问 `/edit`）。
-5. 在弹出的页面中输入您在 `EDIT_TOKEN` 中设置的**编辑密钥**进行验证。
-6. 进入编辑界面后，您可以添加、修改或删除链接，然后点击“**保存所有更改**”。保存成功后系统会自动返回主页。
+---
+**注意：** Worker 使用 **HttpOnly Cookie** 来保持编辑和查看会话的有效性。
