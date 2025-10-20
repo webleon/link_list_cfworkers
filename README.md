@@ -1,36 +1,38 @@
-# 🔗 Cloudflare Worker 链接列表管理
+# Cloudflare Worker - 动态链接列表管理
 
-这是一个轻量级的 Cloudflare Worker 应用程序，用于通过 KV Namespace 存储和展示一个可自定义的链接列表。它支持**只读**模式和**受保护的编辑**模式。
+一个基于 Cloudflare Worker 实现的**动态链接列表**应用。它通过 KV 存储数据，并支持**查看**和**编辑**两种模式，受密钥保护。
 
-## ⚙️ 部署与配置
+## ✨ 功能特性
 
-### 1. KV Namespace
+* **动态列表：** 从 Cloudflare KV 读取链接数据。
+* **双重模式 (`ACCESS_MODE` 环境变量控制)：**
+ * `view`：访问 `/` 和 `/edit` 都需要密钥。
+ * `edit`：访问 `/` **无需密钥**；访问 `/edit` 需要密钥。
+* **编辑界面：** 允许添加、修改、删除链接，并保存至 KV。
 
-您需要创建一个 KV Namespace 并将其绑定到 Worker。代码中使用的绑定名称为：`LINK_LIST_NAMESPACE`。
+## 🚀 部署指南
 
-### 2. 环境变量 (Environment Variables)
+### 1. 准备 KV 命名空间
 
-您的 Worker 需要以下环境变量来运行：
+在 Cloudflare Dashboard 中创建 **KV 命名空间**（例如命名为 `LINK_LIST_NAMESPACE`），并将其绑定到您的 Worker。
 
-| 变量名 | 描述 | 示例值 | 必需性 | 默认值 |
-| :--- | :--- | :--- | :--- | :--- |
-| **`EDIT_TOKEN`** | **编辑模式**所需的密钥。用于验证进入 `/edit` 页面和保存更改的权限。 | `my-secret-edit-key-123` | **必需** | N/A |
-| **`VIEW_TOKEN`** | **查看模式**所需的密钥（可选）。如果设置，用户需要输入此密钥或携带正确的 Cookie 才能看到链接列表。 | `my-secret-view-key-456` | 可选 | 无 |
-| **`EDIT_COOKIE_AGE`** | **编辑会话 Cookie** 的有效期（**小时**）。 | `168` | 可选 | **24 小时** |
-| **`VIEW_COOKIE_AGE`** | **查看会话 Cookie** 的有效期（**小时**）。 | `24` | 可选 | **24 小时** |
+### 2. 部署 Worker
+
+将代码部署到 Cloudflare Worker。**必须**配置以下环境变量：
+
+| 变量名 | 描述 | 示例值 | 备注 |
+| :--- | :--- | :--- | :--- |
+| `ACCESS_TOKEN` | 访问/编辑保护密钥。 | `my-secret-key-123` | **必需**。 |
+| `ACCESS_MODE` | 决定主页 (`/`) 策略。 | `view` 或 `edit` | **推荐值**：`view` 或 `edit`。 |
+| `LINK_LIST_NAMESPACE` | KV 命名空间名称。 | `LINK_LIST_NAMESPACE` | 需与步骤 1 的名称一致。 |
 
 ### 3. 初始数据
 
-链接数据存储在 KV 中的 `all_links` 键下，格式为 JSON 数组。您需要在部署后通过 `/edit` 路径初始化或更新此数据。
+首次运行时，列表为空。您可以通过访问 `/edit` (如果 `ACCESS_MODE='edit'`) 或直接向 KV 写入 `all_links` 键来初始化数据。
 
-## 🗺️ 路由和操作
+## 🛠️ 使用说明
 
-| 路由 | 方法 | 描述 | 访问要求 |
-| :--- | :--- | :--- | :--- |
-| `/` | `GET` | 显示链接列表。 | 如果设置了 `VIEW_TOKEN`，则需要验证。 |
-| `/edit` | `GET` | 显示输入编辑密钥的页面。 | 无，进入验证流程。 |
-| `/edit` | `POST` | 提交编辑密钥进行验证。 | 密钥匹配 `EDIT_TOKEN`。成功后将设置会话 Cookie 并进入编辑界面。 |
-| `/save` | `POST` | 提交编辑后的链接数据。 | 必须通过编辑权限验证。 |
+部署成功后，访问您的 Worker 域名：
 
----
-**注意：** Worker 使用 **HttpOnly Cookie** 来保持编辑和查看会话的有效性。
+* **查看列表：** 访问 `your-domain.workers.dev/`。
+* **编辑列表：** 访问 `your-domain.workers.dev/edit`。如果未认证或处于 `ACCESS_MODE='view'` 模式，系统会提示您输入密钥。
