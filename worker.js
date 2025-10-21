@@ -33,6 +33,7 @@ async function getLinks(env) {
     if (!value) return [];
     try {
         const data = JSON.parse(value);
+        // 确保数据结构兼容，这里假设链接是扁平数组
         return Array.isArray(data) ? data.map(link => ({ name: link.name || '', url: link.url || '' })) : [];
     } catch (e) {
         console.error("KV JSON parse error:", e);
@@ -42,7 +43,7 @@ async function getLinks(env) {
 
 
 // =========================================================================
-// 3. HTML/CSS 模板 (高度精简 & 增加 Favicon)
+// 3. HTML/CSS 模板 (单列窄版美化 & 增加 Favicon & 增大卡片高度)
 // =========================================================================
 
 // 极简的链环 SVG 作为 Favicon (内嵌，无需单独文件)
@@ -51,29 +52,71 @@ const FAVICON_BASE64 = `data:image/svg+xml;base64,${btoa(FAVICON_SVG)}`;
 
 
 const BASE_CSS = `
-    body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif, "Apple Color Emoji", "Segoe UI Emoji", "Segoe UI Symbol"; margin: 0; padding: 20px; background-color: #f8f9fa; color: #333; }
-    .container-wide { max-width: 900px; margin: 0 auto; background-color: #fff; padding: 30px; border-radius: 8px; box-shadow: 0 4px 12px rgba(0,0,0,0.08); }
+    /* 基础与布局 */
+    body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif, "Apple Color Emoji", "Segoe UI Emoji", "Segoe UI Symbol"; margin: 0; padding: 20px; background-color: #e9ecef; color: #333; }
+    /* 容器变窄，用于单列列表 */
+    .container-narrow-content { max-width: 600px; margin: 25px 25px; background-color: transparent; padding: 0; box-shadow: none; } 
     .container-narrow { max-width: 450px; margin: 50px auto; background-color: #fff; padding: 30px; border-radius: 8px; box-shadow: 0 4px 12px rgba(0,0,0,0.1); } 
-    h2 { color: #007bff; border-bottom: 2px solid #e9ecef; padding-bottom: 10px; }
-    .btn { border: none; padding: 10px 15px; border-radius: 4px; cursor: pointer; font-weight: bold; transition: background-color 0.2s; text-decoration: none; display: inline-block; text-align: center; }
-    .btn-primary { background-color: #007bff; color: white; } .btn-primary:hover { background-color: #0056b3; }
-    .btn-secondary { background-color: #6c757d; color: white; margin-right: 10px; } .btn-secondary:hover { background-color: #5a6268; }
-    .btn-danger { background-color: #dc3545; color: white; padding: 5px 10px; font-size: 0.9em; } .btn-danger:hover { background-color: #c82333; }
-    .status-message { padding: 10px; border-radius: 4px; margin-bottom: 15px; font-weight: bold; font-size: 0.9em; } 
+    h2 { color: #343a40; border-bottom: none; padding-bottom: 10px; margin-top: 20px; }
+    
+    /* 按钮样式 */
+    .btn { border: none; padding: 10px 15px; border-radius: 6px; cursor: pointer; font-weight: bold; transition: background-color 0.2s, transform 0.1s; text-decoration: none; display: inline-block; text-align: center; }
+    .btn-primary { background-color: #007bff; color: white; } .btn-primary:hover { background-color: #0056b3; transform: translateY(-1px); }
+    .btn-secondary { background-color: #6c757d; color: white; margin-right: 10px; } .btn-secondary:hover { background-color: #5a6268; transform: translateY(-1px); }
+    .btn-danger { background-color: #dc3545; color: white; padding: 5px 10px; font-size: 0.9em; border-radius: 4px; } .btn-danger:hover { background-color: #c82333; }
+    .btn-full-width { width: 100%; }
+
+    /* 状态消息 */
+    .status-message { padding: 12px; border-radius: 6px; margin-bottom: 20px; font-weight: 600; font-size: 1em; text-align: center; } 
     .status-message.error { background-color: #f8d7da; color: #721c24; border: 1px solid #f5c6cb; }
     .status-message.success { background-color: #d4edda; color: #155724; border: 1px solid #c3e6cb; }
     .status-message.info { background-color: #d1ecf1; color: #0c5460; border: 1px solid #bee5eb; }
-    .link-list { list-style: none; padding: 0; margin: 20px 0; }
-    .link-item { display: flex; align-items: center; padding: 15px 20px; margin-bottom: 10px; border: 1px solid #dee2e6; border-radius: 6px; background-color: #ffffff; transition: box-shadow 0.2s ease-in-out; }
-    .link-item:hover { box-shadow: 0 2px 8px rgba(0,0,0,0.1); }
-    .link-title { font-size: 1.1em; font-weight: 600; color: #007bff; text-decoration: none; flex-grow: 1; }
+
+    /* Homer 风格卡片样式 (单列，增大高度) */
+    .link-list-vertical {
+        list-style: none;
+        padding: 0;
+        margin: 25px 0;
+    }
+    .link-card {
+        background-color: #ffffff;
+        border-radius: 8px;
+        box-shadow: 0 2px 6px rgba(0,0,0,0.1);
+        transition: transform 0.2s ease-in-out, box-shadow 0.2s ease-in-out;
+        text-align: left;
+        padding: 30px 20px;
+        margin-bottom: 20px; /* 链接之间留有间距 */
+        display: flex;
+        align-items: center;
+        text-decoration: none; 
+        color: inherit; 
+        /* **关键修改**: 增大高度以方便手机点击 */
+    }
+    .link-card:hover {
+        transform: translateY(-2px);
+        box-shadow: 0 4px 10px rgba(0,0,0,0.15);
+    }
+    .link-title {
+        font-size: 1.4em;
+        font-weight: 600;
+        color: #007bff; /* 标题颜色恢复为蓝色，更像链接 */
+        text-decoration: none;
+        flex-grow: 1;
+        word-break: break-word; 
+    }
+    .link-icon {
+        font-size: 1.4em;
+        margin-right: 15px;
+        color: #6c757d; /* 图标颜色改为灰色 */
+    }
+
+    /* 编辑器样式调整 (保持不变) */
     .editor-controls { margin-top: 25px; display: flex; gap: 10px; flex-wrap: wrap; }
     .input-field { width: 100%; padding: 10px; margin: 10px 0 20px 0; border: 1px solid #ccc; border-radius: 4px; box-sizing: border-box; }
     .editor-table { width: 100%; border-collapse: collapse; margin-top: 15px; }
     .editor-table th, .editor-table td { border: 1px solid #ccc; padding: 10px; text-align: left; }
-    .editor-table th { background-color: #e9ecef; }
-    .editor-table input { width: 95%; padding: 8px; border: 1px solid #ced4da; border-radius: 3px; box-sizing: border-box; }
-    .btn-full-width { width: 100%; }
+    .editor-table th { background-color: #f1f1f1; }
+    .editor-table input { width: 95%; padding: 8px; border: 1px solid #ced4da; border-radius: 4px; box-sizing: border-box; }
 `;
 
 // -------------------------------------------------------------------------
@@ -122,23 +165,36 @@ function renderTokenEntry(mode, statusMessage = null, nextPath = '/') {
 }
 
 // -------------------------------------------------------------------------
-// 渲染列表/编辑页面 (已修复链接打开方式)
+// 渲染列表/编辑页面 (单列窄版美化)
 // -------------------------------------------------------------------------
 function renderList(links, isEditMode, statusMessage = null) {
     const msgHtml = statusMessage ? `<p class="status-message ${statusMessage.includes('失败') ? 'error' : 'success'}">${statusMessage}</p>` : '';
 
     if (!isEditMode) {
-        // 修复：移除 target="_blank"，链接在当前页打开
-        const listItems = links.map(link => `<li class="link-item"><a href="${link.url}" title="点击跳转到: ${link.url}" class="link-title">${link.name || '无名称链接'}</a></li>`).join('');
+        // 渲染为垂直列表 (单列卡片) 结构
+        
+        const listContent = links.length === 0 
+            ? '<p style="text-align: center; margin: 30px 0;">当前没有已配置的链接。</p>' 
+            : `<ul class="link-list-vertical">${links.map((link, index) => {
+                const iconHtml = `<div class="link-icon">🔗</div>`; 
+                return `
+                    <li class="link-item-wrapper">
+                        <a href="${link.url}" class="link-card" title="点击跳转到: ${link.url}">
+                            ${iconHtml}
+                            <span class="link-title">${link.name || '无名称链接'}</span>
+                        </a>
+                    </li>`;
+            }).join('')}</ul>`;
+
         const html = `
 <!DOCTYPE html><html><head><title>链接列表</title><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1.0">
     <link rel="icon" href="${FAVICON_BASE64}" type="image/svg+xml">
     <style>${BASE_CSS}</style></head>
-<body><div class="container-wide">${msgHtml}<h2>精选链接</h2>${links.length === 0 ? '<p>当前没有已配置的链接。</p>' : `<ul class="link-list">${listItems}</ul>`}<p class="edit-prompt"><a href="${EDIT_PATH}" class="btn btn-primary">编辑</a></p></div></body></html>`;
+<body><div class="container-narrow-content">${msgHtml}<h2>精选链接</h2>${listContent}<p style="margin-top: 30px;"><a href="${EDIT_PATH}" class="btn btn-primary">编辑</a></p></div></body></html>`;
         return html;
     } 
     
-    // 编辑模式 (JS 逻辑保持不变，但被压缩在模板字符串中)
+    // 编辑模式 (保持表格用于编辑)
     let linkRows = links.map((link, index) => {
         const safeName = link.name ? link.name.replace(/"/g, '&quot;') : '';
         const safeUrl = link.url ? link.url.replace(/"/g, '&quot;') : '';
@@ -166,8 +222,10 @@ function renderList(links, isEditMode, statusMessage = null) {
         if (tbody.children.length < ${MAX_LINKS}) { addRow(); }
         document.getElementById('add-row-btn').addEventListener('click', () => addRow());
         document.getElementById('editor-form').addEventListener('submit', function() {
-            document.querySelectorAll('.link-editor-row').forEach((row, index) => {
-                row.querySelector('input[name^="link_"]').name = \`link_\${index}_name\`;
+            // 重新排序并重命名输入框以确保正确保存
+            const rows = Array.from(tbody.querySelectorAll('.link-editor-row'));
+            rows.forEach((row, index) => {
+                row.querySelector('input[name$="_name"]').name = \`link_\${index}_name\`;
                 row.querySelector('input[name$="_url"]').name = \`link_\${index}_url\`;
             });
         });`;
@@ -176,7 +234,7 @@ function renderList(links, isEditMode, statusMessage = null) {
 <!DOCTYPE html><html><head><title>编辑链接列表</title><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1.0">
     <link rel="icon" href="${FAVICON_BASE64}" type="image/svg+xml">
     <style>${BASE_CSS}</style></head>
-<body><div class="container-wide">${msgHtml}<h2>编辑链接列表 (最多 ${MAX_LINKS} 个链接)</h2><p class="status-message info">请编辑现有链接或点击“添加新链接”来创建新的条目。**保存时会提交所有可见的行。**</p><form id="editor-form" method="POST" action="/save"><table class="editor-table"><thead><tr><th>名称 (Name)</th><th>URL (链接)</th><th>操作</th></tr></thead><tbody id="link-editor-tbody">${linkRows}</tbody></table><div class="editor-controls"><button type="button" class="btn btn-secondary" id="add-row-btn">添加新链接</button><button type="submit" class="btn btn-primary">保存所有更改</button><button onclick="window.location.href='/'" class="btn btn-secondary" type="button">取消并返回</button></div></form></div>
+<body><div class="container-narrow">${msgHtml}<h2>编辑链接列表 (最多 ${MAX_LINKS} 个链接)</h2><p class="status-message info">请编辑现有链接或点击“添加新链接”来创建新的条目。**保存时会提交所有可见的行。**</p><form id="editor-form" method="POST" action="/save"><table class="editor-table"><thead><tr><th>名称 (Name)</th><th>URL (链接)</th><th>操作</th></tr></thead><tbody id="link-editor-tbody">${linkRows}</tbody></table><div class="editor-controls"><button type="button" class="btn btn-secondary" id="add-row-btn">添加新链接</button><button type="submit" class="btn btn-primary">保存所有更改</button><button onclick="window.location.href='/'" class="btn btn-secondary" type="button">取消并返回</button></div></form></div>
 <script>${script}</script></body></html>`;
     return html;
 }
@@ -249,10 +307,18 @@ async function handleRequest(request, env) {
             try {
                 const formData = await request.formData();
                 const newLinks = [];
+                // 遍历所有可能的索引，直到 MAX_LINKS
                 for (let i = 0; i < MAX_LINKS; i++) {
-                    const name = (formData.get(`link_${i}_name`) || '').toString().trim();
-                    const url = (formData.get(`link_${i}_url`) || '').toString().trim();
-                    if (name || url) newLinks.push({ name, url });
+                    const nameInput = formData.get(`link_${i}_name`);
+                    const urlInput = formData.get(`link_${i}_url`);
+                    
+                    // 检查是否存在（因为 JS 中我们可能添加了空行，但提交时它们应该存在于 form data 中）
+                    if (nameInput !== null || urlInput !== null) {
+                        const name = (nameInput || '').toString().trim();
+                        const url = (urlInput || '').toString().trim();
+                        // 仅保存非空链接
+                        if (name || url) newLinks.push({ name, url });
+                    }
                 }
                 await env[KV_NAMESPACE].put("all_links", JSON.stringify(newLinks));
                 // 成功：303 重定向到 /success
